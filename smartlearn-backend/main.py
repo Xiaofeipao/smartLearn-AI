@@ -57,7 +57,7 @@ async def upload_pdf(
         raise HTTPException(status_code=400, detail="Empty file")
 
     # Extract pages
-    from .services.pdf import extract_pages
+    from services.pdf import extract_pages
 
     pages = extract_pages(pdf_bytes)
 
@@ -92,7 +92,7 @@ async def chat(request: ChatRequest):
         )
 
     # Call LLM
-    from .services.llm import answer_from_pages
+    from services.llm import answer_from_pages
 
     try:
         answer = answer_from_pages(pages, request.message)
