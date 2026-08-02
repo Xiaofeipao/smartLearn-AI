@@ -1,0 +1,198 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 1rem;
+  line-height: 1.6;
+  background: #f0f2f5;
+  color: #1a1a2e;
+}
+
+/* ── Layout ── */
+.app {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+}
+
+h1 {
+  margin: 0 0 1.5rem;
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+/* ── Sections ── */
+.upload-zone,
+.ask-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+
+/* ── Labels ── */
+label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #2d3436;
+}
+
+/* ── File input ── */
+input[type="file"] {
+  font-size: 0.875rem;
+  padding: 0.4rem 0;
+}
+
+input[type="file"]::file-selector-button {
+  padding: 0.35rem 0.75rem;
+  border: 1px solid #c0c4cc;
+  border-radius: 4px;
+  background: #fff;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+input[type="file"]::file-selector-button:hover {
+  background: #e9ecef;
+}
+
+.file-name {
+  font-size: 0.8rem;
+  color: #555;
+  word-break: break-all;
+}
+
+/* ── Textarea ── */
+textarea {
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid #c0c4cc;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  resize: vertical;
+  background: #fff;
+  transition: border-color 0.15s;
+}
+
+textarea:focus {
+  outline: none;
+  border-color: #4a6cf7;
+  box-shadow: 0 0 0 3px rgba(74, 108, 247, 0.15);
+}
+
+/* ── Buttons ── */
+button {
+  align-self: flex-start;
+  padding: 0.5rem 1.25rem;
+  border: none;
+  border-radius: 6px;
+  background: #4a6cf7;
+  color: #fff;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s, opacity 0.15s;
+}
+
+button:hover:not(:disabled) {
+  background: #3651d5;
+}
+
+button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(74, 108, 247, 0.4);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── Upload info ── */
+.upload-info {
+  margin: 0 0 1.25rem;
+  padding: 0.6rem 0.85rem;
+  background: #e8f5e9;
+  border-left: 4px solid #2e7d32;
+  border-radius: 0 6px 6px 0;
+  font-size: 0.85rem;
+  color: #1b5e20;
+}
+
+/* ── Status ── */
+.status-text {
+  font-size: 0.85rem;
+  color: #4a6cf7;
+  font-style: italic;
+}
+
+/* ── Error ── */
+.error-banner {
+  padding: 0.6rem 0.85rem;
+  background: #fdecea;
+  border-left: 4px solid #c62828;
+  border-radius: 0 6px 6px 0;
+  font-size: 0.85rem;
+  color: #7f0000;
+}
+
+/* ── Answer card ── */
+.answer-card {
+  margin-top: 1.5rem;
+  padding: 1rem 1.25rem;
+  background: #fff;
+  border: 1px solid #dde;
+  border-radius: 8px;
+}
+
+.answer-text {
+  margin: 0 0 1rem;
+  font-size: 0.95rem;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+/* ── Citations ── */
+.citations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.citation-chip {
+  display: inline-block;
+  padding: 0.2rem 0.65rem;
+  background: #eef2ff;
+  border: 1px solid #c4d0fc;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #3651d5;
+}
+
+/* ── Narrow screens ── */
+@media (max-width: 500px) {
+  .app {
+    padding: 1.25rem 1rem 3rem;
+  }
+
+  button {
+    align-self: stretch;
+  }
+
+  .answer-card {
+    padding: 0.85rem 1rem;
+  }
+}
