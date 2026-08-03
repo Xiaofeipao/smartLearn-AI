@@ -6,9 +6,21 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+import shutil
+
 from services import rag
+from services.llm import answer_from_pages
 
 app = FastAPI(title="SmartLearn Lite API")
+
+
+@app.on_event("startup")
+async def on_startup():
+    """Clear uploaded files on every restart — forces re-upload before /chat works."""
+    up = Path("uploads")
+    if up.exists():
+        shutil.rmtree(up)
+    up.mkdir(parents=True, exist_ok=True)
 
 # CORS
 allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173")
@@ -41,7 +53,7 @@ documents: dict = {}
 
 
 class ChatRequest(BaseModel):
-    chat_id: str = Field(default="day2-demo", min_length=1)
+    chat_id: str = Field(..., min_length=1)
     message: str = Field(..., min_length=2, max_length=2000)
 
 
@@ -111,18 +123,23 @@ async def chat(request: ChatRequest):
                    f"Upload a PDF first via POST /upload?chat_id={request.chat_id}.",
         )
 
-    # Day 2-style: feed all pages to LLM directly (no retrieval)
+    # Day 2-style: feed all pages to LLM directly, with conversation history
     pages = document["pages"]
-    from services.llm import answer_from_pages
+
+    # Maintain conversation history for multi-turn context
+    history = document.setdefault("history", [])
 
     try:
-        answer = answer_from_pages(pages, request.message)
+        answer = answer_from_pages(pages, request.message, history=history)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Upstream AI service unavailable: {e}")
+
+    # Record this turn for future follow-up questions
+    history.append({"question": request.message, "answer": answer})
 
     # Extract distinct [Page X] citations
     existing = {p["page"] for p in pages}
     cited = {int(n) for n in re.findall(r"\[Page (\d+)\]", answer)}
     citations = sorted(cited & existing)
 
-    return {"answer": answer, "citations": citations}
+    return {"answer": answer, "citations": citations, "sources": []}

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { askQuestion } from "./api";
 
-export default function ChatPanel({ enabled, onBusy, onJumpToPage }) {
+export default function ChatPanel({ chatId, enabled, onBusy, onJumpToPage }) {
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -19,7 +19,7 @@ export default function ChatPanel({ enabled, onBusy, onJumpToPage }) {
     setMessage("");
 
     try {
-      const data = await askQuestion(q);
+      const data = await askQuestion(q, chatId);
       setMessages((prev) => [
         ...prev,
         {

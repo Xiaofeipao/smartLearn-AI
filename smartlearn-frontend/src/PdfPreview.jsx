@@ -1,6 +1,6 @@
 import { getDocumentFileURL } from "./api";
 
-export default function PdfPreview({ upload, activePage, previewKey }) {
+export default function PdfPreview({ chatId, upload, activePage, previewKey }) {
   if (!upload) {
     return (
       <div className="pdf-placeholder">
@@ -16,7 +16,7 @@ export default function PdfPreview({ upload, activePage, previewKey }) {
       </div>
       <iframe
         key={previewKey}
-        src={getDocumentFileURL(activePage)}
+        src={getDocumentFileURL(chatId, activePage)}
         title="PDF Preview"
         className="pdf-iframe"
       />
