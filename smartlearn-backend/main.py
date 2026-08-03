@@ -1,4 +1,5 @@
 import os
+import re
 from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -110,19 +111,18 @@ async def chat(request: ChatRequest):
                    f"Upload a PDF first via POST /upload?chat_id={request.chat_id}.",
         )
 
-    # RAG answer with retrieval + history
-    try:
-        result = rag.answer_chat_turn(
-            document=document,
-            message=request.message,
-            top_k=3,
-            candidate_pool=60,
-        )
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Answer generation failed: {e}")
+    # Day 2-style: feed all pages to LLM directly (no retrieval)
+    pages = document["pages"]
+    from services.llm import answer_from_pages
 
-    return {
-        "answer": result["answer"],
-        "citations": result["citations"],
-        "sources": result.get("sources", []),
-    }
+    try:
+        answer = answer_from_pages(pages, request.message)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Upstream AI service unavailable: {e}")
+
+    # Extract distinct [Page X] citations
+    existing = {p["page"] for p in pages}
+    cited = {int(n) for n in re.findall(r"\[Page (\d+)\]", answer)}
+    citations = sorted(cited & existing)
+
+    return {"answer": answer, "citations": citations}
