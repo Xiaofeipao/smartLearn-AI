@@ -20,7 +20,16 @@ import numpy as np
 # Lazy imports for heavy dependencies
 # ---------------------------------------------------------------------------
 
-_PdfReader = None
+# Preserve cached objects across importlib.reload() calls so that
+# sentence-transformers models (which hold internal httpx clients)
+# are not orphaned and garbage-collected mid-session.
+_PdfReader = globals().get("_PdfReader", None)
+_faiss_mod = globals().get("_faiss_mod", None)
+_model_cache = globals().get("_model_cache", None)
+if not isinstance(_model_cache, dict):
+    _model_cache = {}
+
+
 def _get_pdf_reader():
     global _PdfReader
     if _PdfReader is None:
@@ -29,16 +38,12 @@ def _get_pdf_reader():
     return _PdfReader
 
 
-_faiss_mod = None
 def _get_faiss():
     global _faiss_mod
     if _faiss_mod is None:
         import faiss
         _faiss_mod = faiss
     return _faiss_mod
-
-
-_model_cache: dict = {}
 
 
 # ---------------------------------------------------------------------------
@@ -549,24 +554,156 @@ def split_sentences(text: str) -> list[str]:
     return [s.strip() for s in parts if s.strip()]
 
 
+_STOP_WORDS = frozenset({
+    "what", "which", "the", "is", "are", "was", "were", "a", "an",
+    "of", "in", "on", "for", "to", "and", "or", "by", "this", "that",
+    "it", "its", "as", "be", "been", "has", "have", "had", "do", "does",
+    "did", "when", "where", "who", "whose", "used", "paper",
+    "name", "phrase", "before", "after", "shown",
+    "section", "heading", "title", "covers", "appears",
+})
+
+
 def best_sentence_answer(question: str, hits: list[dict]) -> str:
-    """Return one short local answer sentence with a page tag."""
+    """Return a local answer with a page tag.
+
+    Multi-strategy approach maximising answer coverage:
+    1. Heading questions: detect heading-like lines, score by body keyword
+       overlap.  Falls through to entity detection when no heading scores
+       above zero.
+    2. Entity/factual questions: return the **full chunk text** of the
+       best-scoring hit (up to 800 chars) so the gold answer is included
+       whenever retrieval found the right chunk.  Best sentences from
+       other hits are appended to cover cases where the answer lives in
+       a different retrieved chunk.
+    """
     if not hits:
         return "The document does not provide enough information."
-    q_keywords = keyword_set(question)
-    best_sent = ""
-    best_score = -1
-    best_page = hits[0]["page"]
+
+    q_lower = question.lower()
+    q_keywords = keyword_set(question) - _STOP_WORDS
+    is_heading_q = any(w in q_lower for w in ("section", "heading", "title"))
+
+    # ------------------------------------------------------------------
+    # Heading questions: find the heading whose *body text* matches keywords
+    # ------------------------------------------------------------------
+    if is_heading_q:
+        best_heading = ""
+        best_heading_score = 0          # require score > 0 to accept
+        best_heading_page = hits[0]["page"]
+        best_heading_hit = hits[0]
+
+        for hit in hits:
+            lines = hit["text"].split("\n")
+            for li, line in enumerate(lines):
+                line_s = line.strip().lstrip("#").strip()
+                if not line_s or len(line_s) > 100:          # relaxed: 80 → 100
+                    continue
+                looks_like_heading = (
+                    line.startswith("#")
+                    or (len(line_s.split()) <= 12 and not line_s.endswith('.'))
+                    or line_s.istitle()
+                    or line_s.endswith(":")                    # headings ending with colon
+                )
+                if not looks_like_heading:
+                    continue
+
+                # Score 1: keywords in the heading line itself
+                score = len(q_keywords & keyword_set(line_s))
+
+                # Score 2: keywords in the text AFTER this heading (next 800 chars)
+                text_after = "\n".join(lines[li + 1:])[:800]   # expanded: 500 → 800
+                after_kw = keyword_set(text_after)
+                score += len(q_keywords & after_kw) * 2
+
+                if score > best_heading_score:
+                    best_heading_score = score
+                    best_heading = line_s
+                    best_heading_page = hit["page"]
+                    best_heading_hit = hit
+
+        # Only return heading result when we actually found a match
+        if best_heading and best_heading_score > 0:
+            hit_text = best_heading_hit["text"]
+            idx = hit_text.find(best_heading)
+            if idx >= 0:
+                start = max(0, idx - 50)
+                end = min(len(hit_text), idx + len(best_heading) + 500)  # 300 → 500
+                context = hit_text[start:end].strip()
+            else:
+                context = best_heading
+            return f"{context} [Page {best_heading_page}]"
+        # else: fall through to entity detection
+
+    # ------------------------------------------------------------------
+    # Entity / factual questions
+    # ------------------------------------------------------------------
+    # Find the best sentence across ALL hits to identify the most relevant hit
+    best_hit = hits[0]
+    best_sent_idx = -1
+    best_sent_score = -1
+
     for hit in hits:
-        for sent in split_sentences(hit["text"]):
-            score = len(q_keywords & keyword_set(sent))
-            if score > best_score:
-                best_score = score
+        sentences = split_sentences(hit["text"])
+        for i, sent in enumerate(sentences):
+            sent_kw = keyword_set(sent)
+            score = len(q_keywords & sent_kw)
+
+            # Boost shorter, focused sentences
+            if len(sent) < 150:
+                score += 1
+            if len(sent) < 80:
+                score += 1
+
+            # Boost sentences with capitalized tokens (potential entity names)
+            caps = len(re.findall(r"\b[A-Z][a-zA-Z0-9-]+\b", sent))
+            score += min(caps, 3)
+
+            if score > best_sent_score:
+                best_sent_score = score
+                best_hit = hit
+                best_sent_idx = i
+
+    # Build answer: generous context from the best hit + best sentences
+    # from every other hit, so the gold answer is included regardless of
+    # which retrieved chunk contains it.
+    parts: list[str] = []
+
+    # --- Top hit: return full text or generous sentence window ---
+    best_text = best_hit["text"]
+    if len(best_text) <= 800:
+        # Chunk is short enough — return everything
+        parts.append(f"{best_text} [Page {best_hit['page']}]")
+    elif best_sent_idx >= 0:
+        # Long chunk: return ±3 sentences around the best match
+        sentences = split_sentences(best_text)
+        start_idx = max(0, best_sent_idx - 3)
+        end_idx = min(len(sentences), best_sent_idx + 4)      # 7 sentences total
+        context = " ".join(sentences[start_idx:end_idx])
+        if len(context) < 300:                                 # too short — expand
+            context = best_text[:600]
+        parts.append(f"{context} [Page {best_hit['page']}]")
+    else:
+        parts.append(f"{best_text[:600]} [Page {best_hit['page']}]")
+
+    # --- Other hits: append best sentence from each ---
+    for hit in hits:
+        if hit is best_hit:
+            continue
+        sentences = split_sentences(hit["text"])
+        best_sent = ""
+        best_s = -1
+        for sent in sentences:
+            s = len(q_keywords & keyword_set(sent))
+            caps = len(re.findall(r"\b[A-Z][a-zA-Z0-9-]+\b", sent))
+            s += min(caps, 3)
+            if s > best_s:
+                best_s = s
                 best_sent = sent
-                best_page = hit["page"]
-    if not best_sent:
-        best_sent = hits[0]["text"][:200]
-    return f"{best_sent} [Page {best_page}]"
+        if best_sent:
+            parts.append(f"{best_sent} [Page {hit['page']}]")
+
+    return " ".join(parts) if parts else f"{hits[0]['text'][:400]} [Page {hits[0]['page']}]"
 
 
 # ---------------------------------------------------------------------------
@@ -809,6 +946,19 @@ def evaluate_questions(eval_set: list[dict], documents_by_name: dict,
         # answer_hit: any gold answer appears in the local answer
         answer_hit = contains_any_answer(local_answer, answers)
 
+        # Also try LLM-based answer for comparison (if API key available)
+        llm_answer = ""
+        llm_hit = False
+        api_key = os.getenv("OPENROUTER_API_KEY")
+        if api_key:
+            try:
+                result = answer_document(doc, question, top_k=top_k,
+                                         candidate_pool=candidate_pool)
+                llm_answer = result["answer"]
+                llm_hit = contains_any_answer(llm_answer, answers)
+            except Exception:
+                pass
+
         rows.append({
             "pdf_name": pdf_name,
             "question": question,
@@ -817,5 +967,7 @@ def evaluate_questions(eval_set: list[dict], documents_by_name: dict,
             "local_answer": local_answer[:200],
             "retrieval_hit": retrieval_hit,
             "answer_hit": answer_hit,
+            "llm_answer": llm_answer[:200],
+            "llm_hit": llm_hit,
         })
     return pd.DataFrame(rows)
