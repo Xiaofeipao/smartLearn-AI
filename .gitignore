@@ -3,3 +3,9 @@ venv/
 __pycache__/
 *.pyc
 test_files/
+uploads/
+artifacts/
+.venv/
+node_modules/
+dist/
+.vite/

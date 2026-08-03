@@ -7,6 +7,10 @@ async function readJSON(response) {
   return data
 }
 
+export function getDocumentFileURL(page = 1) {
+  return `${API}/documents/${encodeURIComponent(CHAT_ID)}/file#page=${page}`
+}
+
 export async function uploadPDF(file) {
   const formData = new FormData()
   formData.append("file", file)

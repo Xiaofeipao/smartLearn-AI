@@ -1,13 +1,16 @@
 import { useState } from "react";
-import { uploadPDF, askQuestion } from "./api";
+import { uploadPDF } from "./api";
+import PdfPreview from "./PdfPreview";
+import ChatPanel from "./ChatPanel";
 
 export default function App() {
   const [file, setFile] = useState(null);
   const [upload, setUpload] = useState(null);
-  const [message, setMessage] = useState("");
-  const [answer, setAnswer] = useState(null);
+  const [activePage, setActivePage] = useState(1);
+  const [previewKey, setPreviewKey] = useState(0);
   const [status, setStatus] = useState(null);
   const [error, setError] = useState(null);
+  const [chatKey, setChatKey] = useState(0);
 
   async function handleUpload() {
     if (!file) return;
@@ -16,6 +19,9 @@ export default function App() {
     try {
       const data = await uploadPDF(file);
       setUpload(data);
+      setActivePage(1);
+      setPreviewKey((k) => k + 1);
+      setChatKey((k) => k + 1);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -23,26 +29,15 @@ export default function App() {
     }
   }
 
-  async function handleAsk() {
-    const q = message.trim();
-    if (!q) return;
-    setStatus("Asking…");
-    setError(null);
-    try {
-      const data = await askQuestion(q);
-      setAnswer(data);
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setStatus(null);
-    }
+  function handleJumpToPage(page) {
+    setActivePage(page);
   }
 
   return (
     <main className="app">
       <h1>SmartLearn Lite</h1>
 
-      <section className="upload-zone">
+      <div className="upload-zone">
         <label htmlFor="file-input">PDF file</label>
         <input
           id="file-input"
@@ -50,61 +45,41 @@ export default function App() {
           accept=".pdf"
           onChange={(e) => setFile(e.target.files[0])}
         />
-        {file && <span className="file-name">{file.name}</span>}
-        <button type="button" onClick={handleUpload} disabled={!file || status}>
+        <button
+          type="button"
+          onClick={handleUpload}
+          disabled={!file || status}
+        >
           Upload
         </button>
-      </section>
+      </div>
 
       {upload && (
         <p className="upload-info">
-          {upload.filename} — {upload.pages} pages, {upload.characters}{" "}
-          characters
+          Uploaded: {upload.filename} — {upload.pages} pages,{" "}
+          {upload.characters} characters
         </p>
       )}
 
-      <section className="ask-zone">
-        <label htmlFor="message">Question</label>
-        <textarea
-          id="message"
-          rows={3}
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-        />
-        <button
-          type="button"
-          onClick={handleAsk}
-          disabled={!upload || !message.trim() || status}
-        >
-          Ask
-        </button>
-      </section>
+      {status && <p className="status-text">{status}</p>}
+      {error && <div className="error-banner" role="alert">{error}</div>}
 
-      {status && (
-        <p className="status-text" role="status">
-          {status}
-        </p>
-      )}
-      {error && (
-        <p className="error-banner" role="alert">
-          {error}
-        </p>
-      )}
-
-      {answer && (
-        <section className="answer-card">
-          <p className="answer-text">{answer.answer}</p>
-          {answer.citations.length > 0 && (
-            <ul className="citations">
-              {answer.citations.map((page) => (
-                <li className="citation-chip" key={page}>
-                  Page {page}
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      )}
+      <div className="workspace">
+        <div className="workspace-left">
+          <PdfPreview
+            upload={upload}
+            activePage={activePage}
+            previewKey={previewKey}
+          />
+        </div>
+        <div className="workspace-right">
+          <ChatPanel
+            key={chatKey}
+            enabled={!!upload}
+            onJumpToPage={handleJumpToPage}
+          />
+        </div>
+      </div>
     </main>
   );
 }

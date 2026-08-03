@@ -1,7 +1,11 @@
 import os
+from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+
+from services import rag
 
 app = FastAPI(title="SmartLearn Lite API")
 
@@ -56,13 +60,19 @@ async def upload_pdf(
     if not pdf_bytes:
         raise HTTPException(status_code=400, detail="Empty file")
 
-    # Extract pages
-    from services.pdf import extract_pages
-
-    pages = extract_pages(pdf_bytes)
+    # Build RAG-ready document record
+    try:
+        document = rag.prepare_rag_chat_record(
+            chat_id=chat_id,
+            filename=file.filename,
+            pdf_bytes=pdf_bytes,
+            upload_root="uploads",
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to process PDF: {e}")
 
     # Reject PDF with zero readable text
-    total_chars = sum(len(p["text"]) for p in pages)
+    total_chars = sum(len(p["text"]) for p in document["pages"])
     if total_chars == 0:
         raise HTTPException(
             status_code=422,
@@ -70,40 +80,49 @@ async def upload_pdf(
         )
 
     # Store in memory
-    documents[chat_id] = pages
+    documents[chat_id] = document
 
-    return {
-        "status": "ok",
-        "filename": file.filename,
-        "pages": len(pages),
-        "characters": total_chars,
-    }
+    # Return Day 2-compatible response
+    return rag.build_upload_response(document)
+
+
+@app.get("/documents/{chat_id}/file")
+async def get_document_file(chat_id: str):
+    document = documents.get(chat_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail=f"No document found for chat_id '{chat_id}'")
+
+    file_path = document.get("saved_pdf_path")
+    if not file_path or not Path(file_path).exists():
+        raise HTTPException(status_code=404, detail="Saved PDF file not found")
+
+    return FileResponse(file_path, media_type="application/pdf")
 
 
 @app.post("/chat")
 async def chat(request: ChatRequest):
-    # Look up stored pages
-    pages = documents.get(request.chat_id)
-    if pages is None:
+    # Look up stored document
+    document = documents.get(request.chat_id)
+    if document is None:
         raise HTTPException(
             status_code=404,
             detail=f"No PDF uploaded for chat_id '{request.chat_id}'. "
                    f"Upload a PDF first via POST /upload?chat_id={request.chat_id}.",
         )
 
-    # Call LLM
-    from services.llm import answer_from_pages
-
+    # RAG answer with retrieval + history
     try:
-        answer = answer_from_pages(pages, request.message)
+        result = rag.answer_chat_turn(
+            document=document,
+            message=request.message,
+            top_k=3,
+            candidate_pool=60,
+        )
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Upstream AI service unavailable: {e}")
+        raise HTTPException(status_code=502, detail=f"Answer generation failed: {e}")
 
-    # Extract distinct [Page X] citations
-    import re
-
-    existing = {p["page"] for p in pages}
-    cited = {int(n) for n in re.findall(r"\[Page (\d+)\]", answer)}
-    citations = sorted(cited & existing)
-
-    return {"answer": answer, "citations": citations}
+    return {
+        "answer": result["answer"],
+        "citations": result["citations"],
+        "sources": result.get("sources", []),
+    }
