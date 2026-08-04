@@ -137,9 +137,9 @@ async def chat(request: ChatRequest):
     # Record this turn for future follow-up questions
     history.append({"question": request.message, "answer": answer})
 
-    # Extract distinct [Page X] citations
+    # Extract distinct Page N citations (handles [Page 4], [Page 4, Page 7], etc.)
     existing = {p["page"] for p in pages}
-    cited = {int(n) for n in re.findall(r"\[Page (\d+)\]", answer)}
+    cited = {int(n) for n in re.findall(r"Page (\d+)", answer)}
     citations = sorted(cited & existing)
 
     return {"answer": answer, "citations": citations, "sources": []}

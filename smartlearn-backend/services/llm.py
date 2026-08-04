@@ -52,4 +52,6 @@ def answer_from_pages(
         temperature=0.0,
         messages=messages,
     )
+    if not response or not response.choices:
+        raise RuntimeError("LLM returned no response (model may be rate-limited, please retry)")
     return response.choices[0].message.content or ""
